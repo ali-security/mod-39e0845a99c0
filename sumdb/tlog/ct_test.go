@@ -23,6 +23,11 @@ func TestCertificateTransparency(t *testing.T) {
 		t.Skip("skipping in -short mode")
 	}
 
+	// Seal: the Google argon2020 CT log this test queries has been retired;
+	// every ct.googleapis.com/logs/argon2020 endpoint now answers HTTP 404, so
+	// the test can no longer fetch the proofs it verifies.
+	t.Skip("skipping: external argon2020 Certificate Transparency log is retired (HTTP 404)")
+
 	var root ctTree
 	httpGET(t, "http://ct.googleapis.com/logs/argon2020/ct/v1/get-sth", &root)
 

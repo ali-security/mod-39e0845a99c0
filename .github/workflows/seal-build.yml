@@ -1,0 +1,131 @@
+# Upstream golang.org/x/mod has no GitHub Actions CI (it is developed on
+# Gerrit and tested by the Go project's own build infrastructure). This
+# workflow is authored by Seal to build the published module zip and to run
+# the project's real test suite on every OS the package supports.
+name: seal-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Go package/test selector; empty runs the whole suite"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  module-zip:
+    name: module zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Build the module zip
+        run: |
+          set -eux
+          # Build the zip helper as its own module OUTSIDE the checkout, so
+          # `go get` never touches golang.org/x/mod's own go.mod/go.sum.
+          helper="$(mktemp -d)"
+          cp "$GITHUB_WORKSPACE/.github/create_mod.go" "$helper/create_mod.go"
+          cd "$helper"
+          go mod init example.com/sealzip
+          go get golang.org/x/mod@v0.22.0
+          go mod tidy
+          go build -o "$helper/create_mod" .
+
+          # zip.CreateFromDir packs the whole tree; upstream ships no .github
+          # directory, so this workflow and its helper must not leak into the
+          # artifact.
+          rm -rf "$GITHUB_WORKSPACE/.github"
+
+          mkdir -p "${{ runner.temp }}/out"
+          "$helper/create_mod" golang.org/x/mod v0.22.0 "$GITHUB_WORKSPACE" "${{ runner.temp }}/out/v0.22.0.zip"
+          unzip -l "${{ runner.temp }}/out/v0.22.0.zip" | tail -n 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module-zip
+          path: ${{ runner.temp }}/out/v0.22.0.zip
+          if-no-files-found: error
+
+  test:
+    name: test (${{ matrix.os }}, go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # go.mod declares go 1.22.0 — the release toolchain.
+          - os: ubuntu-latest
+            go: "1.22"
+          - os: windows-latest
+            go: "1.22"
+          # Go <= 1.22 links test binaries without an LC_UUID load command,
+          # which current macOS dyld refuses to load (abort trap before any
+          # test runs); 1.23 is the oldest toolchain that runs on the runner.
+          - os: macos-latest
+            go: "1.23"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Several suites (modfile golden files, zip testdata txtar archives and
+      # dirhash checks) byte-compare committed fixtures, so the Windows
+      # runner's default core.autocrlf=true corrupts them. Must run BEFORE
+      # checkout.
+      - name: Keep LF line endings on Windows
+        if: runner.os == 'Windows'
+        run: |
+          set -eux
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: |
+          set -u
+          log="${{ runner.temp }}/go-test.log"
+          # Full verbose output goes to a file (it is too long for the job
+          # log); the summary below prints the per-package results, the
+          # pass/skip/fail counts, and every skipped/failed test with its reason.
+          rc=0
+          go test -v ${{ inputs.test-filter || './...' }} > "$log" 2>&1 || rc=$?
+
+          echo "=== Per-package results ==="
+          grep -E '^(ok|FAIL|\?)\s' "$log" || :
+          grep -nE -A10 '^panic' "$log" || :
+
+          echo "=== Skipped tests (with the test's own skip message) ==="
+          grep -nE -B3 '^\s*--- SKIP' "$log" || echo "(none)"
+          echo "=== Failed tests ==="
+          grep -nE -B20 '^\s*--- FAIL' "$log" || echo "(none)"
+
+          echo "=== Summary ==="
+          echo "packages ok:      $(grep -cE '^ok\s' "$log")"
+          echo "packages FAIL:    $(grep -cE '^FAIL\s' "$log")"
+          echo "tests passed:     $(grep -cE '^\s*--- PASS' "$log")  (top-level tests and subtests)"
+          echo "tests skipped:    $(grep -cE '^\s*--- SKIP' "$log")"
+          echo "tests failed:     $(grep -cE '^\s*--- FAIL' "$log")"
+          echo "go test exit code: $rc"
+          exit "$rc"

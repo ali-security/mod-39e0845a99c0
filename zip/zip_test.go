@@ -1106,23 +1106,10 @@ func TestVCS(t *testing.T) {
 			wantZipHash:     "cf3ff89056b785d7b3ef3a10e984efd83b47d9e65eabe8098b927b3370d5c3eb",
 		},
 
-		// Test cases from vcs-test.golang.org
-		{
-			m:               module.Version{Path: "vcs-test.golang.org/git/v3pkg.git/v3", Version: "v3.0.0"},
-			vcs:             "git",
-			url:             "https://vcs-test.golang.org/git/v3pkg",
-			rev:             "v3.0.0",
-			wantContentHash: "h1:mZhljS1BaiW8lODR6wqY5pDxbhXja04rWPFXPwRAtvA=",
-			wantZipHash:     "9c65f0d235e531008dc04e977f6fa5d678febc68679bb63d4148dadb91d3fe57",
-		},
-		{
-			m:               module.Version{Path: "vcs-test.golang.org/go/custom-hg-hello", Version: "v0.0.0-20171010233936-a8c8e7a40da9"},
-			vcs:             "hg",
-			url:             "https://vcs-test.golang.org/hg/custom-hg-hello",
-			rev:             "a8c8e7a40da9",
-			wantContentHash: "h1:LU6jFCbwn5VVgTcj+y4LspOpJHLZvl5TGPE+LwwpMw4=",
-			wantZipHash:     "a1b12047da979d618c639ee98f370767a13d0507bd77785dc2f8dad66b40e2e6",
-		},
+		// Seal: the two vcs-test.golang.org cases (git v3pkg and hg
+		// custom-hg-hello) were removed: that server no longer hosts those
+		// repositories (requests redirect to go.dev and the clones fail), so the
+		// cases could only ever skip via the download-error path.
 
 		// Latest versions of selected golang.org/x repos
 		{
